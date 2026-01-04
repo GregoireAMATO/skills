@@ -9,7 +9,18 @@ SSH_PORT="${1:-22}"
 SSHD_CONFIG="/etc/ssh/sshd_config"
 BACKUP_FILE="/etc/ssh/sshd_config.backup.$(date +%Y%m%d%H%M%S)"
 
+# Detect SSH service name (Ubuntu uses 'ssh', others use 'sshd')
+if systemctl list-units --type=service | grep -q "ssh.service"; then
+    SSH_SERVICE="ssh"
+elif systemctl list-units --type=service | grep -q "sshd.service"; then
+    SSH_SERVICE="sshd"
+else
+    echo "Error: Cannot detect SSH service name"
+    exit 1
+fi
+
 echo "=== SSH Hardening ==="
+echo "Detected SSH service: $SSH_SERVICE"
 
 # Backup original config
 echo "[1/4] Backing up config to $BACKUP_FILE..."
@@ -59,7 +70,18 @@ else
 fi
 
 echo "[4/4] Restarting SSH service..."
-systemctl restart sshd
+systemctl restart "$SSH_SERVICE"
+
+# Verify service is running
+sleep 2
+if systemctl is-active --quiet "$SSH_SERVICE"; then
+    echo "   Service $SSH_SERVICE is running"
+else
+    echo "Error: SSH service failed to start. Restoring backup..."
+    cp "$BACKUP_FILE" "$SSHD_CONFIG"
+    systemctl restart "$SSH_SERVICE"
+    exit 1
+fi
 
 echo ""
 echo "✅ SSH hardening complete"
@@ -67,5 +89,13 @@ echo "   Port: $SSH_PORT"
 echo "   Root login: disabled"
 echo "   Password auth: disabled"
 echo ""
-echo "⚠️  IMPORTANT: Before disconnecting, verify you can login:"
-echo "   ssh -p $SSH_PORT user@server"
+echo "╔════════════════════════════════════════════════════════════════╗"
+echo "║  ⚠️  CRITICAL: TEST LOGIN BEFORE CLOSING THIS SESSION!        ║"
+echo "║                                                                ║"
+echo "║  Open a NEW terminal and run:                                  ║"
+echo "║    ssh -p $SSH_PORT <username>@<server_ip>                     ║"
+echo "║                                                                ║"
+echo "║  If it fails, run this to restore:                             ║"
+echo "║    sudo cp $BACKUP_FILE $SSHD_CONFIG                           ║"
+echo "║    sudo systemctl restart $SSH_SERVICE                         ║"
+echo "╚════════════════════════════════════════════════════════════════╝"
